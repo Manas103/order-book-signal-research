@@ -1,0 +1,23 @@
+[
+  {
+    "horizon_events": 10,
+    "n_train": 4399010,
+    "n_test": 1599640,
+    "gbt_oos_r2": -0.003311218211289546,
+    "linear_ofi_oos_r2": -7.144240754541897e-11
+  },
+  {
+    "horizon_events": 100,
+    "n_train": 4394060,
+    "n_test": 1597840,
+    "gbt_oos_r2": 0.002548998330654584,
+    "linear_ofi_oos_r2": -4.3189834153523066e-08
+  },
+  {
+    "horizon_events": 1000,
+    "n_train": 4344560,
+    "n_test": 1579840,
+    "gbt_oos_r2": 0.007018474617346837,
+    "linear_ofi_oos_r2": -4.339611527237608e-06
+  }
+]

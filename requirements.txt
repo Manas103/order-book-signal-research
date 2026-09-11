@@ -1,0 +1,8 @@
+numpy==2.5.3
+pandas==3.0.5
+pyarrow==25.0.1
+duckdb==1.5.5
+lightgbm==4.7.0
+scikit-learn==1.9.1
+scipy==1.18.1
+pytest==9.1.1

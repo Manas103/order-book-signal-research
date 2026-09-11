@@ -1,0 +1,10 @@
+# Regenerate with: python scripts/generate_data.py (writes the 220 MB
+# partitioned Parquet message store to data/messages/)
+data/
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/

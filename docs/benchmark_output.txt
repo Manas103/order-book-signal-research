@@ -1,0 +1,8 @@
+Building features with DuckDB SQL window functions...
+Features built: 6,400,000 rows, 43 feature columns, 17.5s.
+Split: 4,400,000 train rows, 1,600,000 test rows (11 train days, 1 embargo day, remaining test days, per ticker).
+horizon=   10 events  n_train=4,399,010  n_test=1,599,640  GBT R^2=-0.0033  linear-OFI R^2=-0.0000  tree_advantage=-0.0033
+horizon=  100 events  n_train=4,394,060  n_test=1,597,840  GBT R^2=+0.0025  linear-OFI R^2=-0.0000  tree_advantage=+0.0025
+horizon= 1000 events  n_train=4,344,560  n_test=1,579,840  GBT R^2=+0.0070  linear-OFI R^2=-0.0000  tree_advantage=+0.0070
+
+Done in 60.8s. Results written to docs/research_results.json

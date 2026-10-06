@@ -1,0 +1,87 @@
+{
+  "fill_probability_by_rank_whole_book": [
+    {
+      "rank_bucket": 1,
+      "n_orders": 8719,
+      "n_filled": 1533,
+      "fill_probability": 0.1758229154719578
+    },
+    {
+      "rank_bucket": 2,
+      "n_orders": 7886,
+      "n_filled": 917,
+      "fill_probability": 0.11628201876743596
+    },
+    {
+      "rank_bucket": 3,
+      "n_orders": 7355,
+      "n_filled": 439,
+      "fill_probability": 0.05968728755948335
+    },
+    {
+      "rank_bucket": 4,
+      "n_orders": 7046,
+      "n_filled": 243,
+      "fill_probability": 0.034487652568833384
+    },
+    {
+      "rank_bucket": 5,
+      "n_orders": 6686,
+      "n_filled": 94,
+      "fill_probability": 0.014059228238109482
+    },
+    {
+      "rank_bucket": 6,
+      "n_orders": 2651674,
+      "n_filled": 51,
+      "fill_probability": 1.9233133484734547e-05
+    }
+  ],
+  "fill_probability_by_rank_at_touch": [
+    {
+      "rank_bucket": 1,
+      "n_orders": 2676,
+      "n_filled": 1439,
+      "fill_probability": 0.5377428998505231
+    },
+    {
+      "rank_bucket": 2,
+      "n_orders": 2661,
+      "n_filled": 868,
+      "fill_probability": 0.32619316046599023
+    },
+    {
+      "rank_bucket": 3,
+      "n_orders": 2471,
+      "n_filled": 426,
+      "fill_probability": 0.17239983812221774
+    },
+    {
+      "rank_bucket": 4,
+      "n_orders": 2426,
+      "n_filled": 238,
+      "fill_probability": 0.09810387469084914
+    },
+    {
+      "rank_bucket": 5,
+      "n_orders": 2246,
+      "n_filled": 92,
+      "fill_probability": 0.04096170970614425
+    },
+    {
+      "rank_bucket": 6,
+      "n_orders": 1075616,
+      "n_filled": 51,
+      "fill_probability": 4.7414690744652364e-05
+    }
+  ],
+  "fill_probability_rank_1_at_touch": 0.5377428998505231,
+  "fill_probability_exact_rank_5_at_touch": 0.04096170970614425,
+  "horizon_seconds": 1.0,
+  "execution_cost_comparison": {
+    "n_decision_points": 12720,
+    "mean_always_crossing_effective_spread_ticks": 0.502751572327044,
+    "mean_rank_aware_effective_spread_ticks": 0.4995358370332581,
+    "pct_less_effective_spread": 0.6396270983105101
+  }
+}

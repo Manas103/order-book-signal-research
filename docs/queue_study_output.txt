@@ -1,0 +1,29 @@
+Computing fill probability by queue rank, whole book (one DuckDB SQL window pass)...
+ rank_bucket  n_orders  n_filled  fill_probability
+           1      8719      1533          0.175823
+           2      7886       917          0.116282
+           3      7355       439          0.059687
+           4      7046       243          0.034488
+           5      6686        94          0.014059
+           6   2651674        51          0.000019
+
+Same computation restricted to ADD events that joined the best bid/ask at the instant of insertion ('at the touch'):
+ rank_bucket  n_orders  n_filled  fill_probability
+           1      2676      1439          0.537743
+           2      2661       868          0.326193
+           3      2471       426          0.172400
+           4      2426       238          0.098104
+           5      2246        92          0.040962
+           6   1075616        51          0.000047
+
+at the touch, fill probability at rank 1: 0.5377   at exact rank 5: 0.0410   (4.7s elapsed)
+
+Building fill-probability-by-queue-depth curve for the cost comparison (at-the-touch ADD events only, matching the decision points below)...
+Loading message snapshots for decision points...
+
+n_decision_points=12,720
+always-crossing mean effective spread: 0.5028 ticks
+rank-aware quote-and-wait mean effective spread: 0.4995 ticks
+rank-aware paid 0.64% less effective spread than always crossing
+
+Done in 7.1s. Results written to docs/queue_study_results.json

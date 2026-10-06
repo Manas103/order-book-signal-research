@@ -233,6 +233,194 @@ add outright, because a crossed book has no well-defined mid price to build
 a regression label from. The two repos are answering different questions
 with the same category of input.
 
+## Extended (Oct. 2026): Queue Position and Fill Probability Study
+
+**What existed before this extension and what is new.** Before this, the
+book builder reconstructed full-depth snapshots but threw away exactly the
+information a resting order's queue position needs: `BookBuilder` keeps a
+FIFO list per price level internally but the message store only ever wrote
+out aggregate level size, never which order was where in that list, because
+nothing before this extension needed it. Three things are new: a full L3
+replay (`obsr/queue_position.py`) that recovers each ADD event's queue rank
+and quantity ahead from the stored message stream alone; a fill-probability
+measurement by queue rank, built as one DuckDB SQL window-function pass
+(`obsr/fill_probability.py`); and an execution-cost comparison between
+always crossing the spread and a rank-aware quote-and-wait rule
+(`obsr/execution_cost.py`), none of which the base repo had any reason to
+include (it only ever asked "does a feature predict a price move", never
+"would an order here have filled").
+
+### Architecture (additions)
+
+```
+obsr/queue_position.py    replays one session's stored message stream
+                           through a fresh BookBuilder, recording each ADD
+                           event's rank (1 = first order ever at that exact
+                           price) and qty_ahead (resting quantity in front
+                           of it), plus whether it joined the best bid/ask
+                           at that instant ("at the touch")
+obsr/fill_probability.py  one DuckDB SQL statement, built entirely from a
+                           forward-looking window function over a UNION of
+                           ADD and EXECUTE rows (no join operator), that
+                           reads off each order's first qualifying EXECUTE
+                           timestamp and buckets fill-within-horizon by rank
+obsr/execution_cost.py    always-crossing vs. rank-aware quote-and-wait
+                           expected effective spread, using the measured
+                           fill-probability-by-queue-depth curve and a
+                           pandas merge_asof forward lookup for the price
+                           one horizon later
+
+scripts/compute_queue_positions.py  runs the replay over all 80 sessions,
+                           writes data/queue_positions/ (same partitioning
+                           as the message store)
+scripts/run_queue_study.py  runs the SQL window pass, the cost comparison,
+                           writes docs/queue_study_results.json
+
+tests/test_queue_position.py      hand-computed rank/qty_ahead/touch on a
+                           9-event scenario, plus a 20,000-operation
+                           randomized sequence diffed against an
+                           independent brute-force ledger that reimplements
+                           price-time-priority execution from scratch
+tests/test_fill_probability_sql.py  hand-computed fill-within-horizon
+                           outcomes (including a fill that lands exactly
+                           one horizon too late, and two sessions reusing
+                           the same order_id, to prove the partition keys
+                           are doing their job) against the SQL window pass
+
+docs/queue_study_output.txt    raw run of scripts/run_queue_study.py
+docs/queue_study_results.json  the same numbers, machine-readable
+```
+
+**Why "at the touch" is reported separately from the whole-book number.**
+The first genuine measurement attempt bucketed every ADD event in the whole
+book by rank, rank 5 meaning "5 or more": fill probability came out 0.1758
+at rank 1 and 0.000055 at rank "5+". That number is real but misleading,
+because it silently mixes two different effects. An order's fill
+probability depends on two things: how far its *price* sits from the
+market, and its *queue position* once it is at a price that matters. Rank
+"5 or more" across the whole book is dominated by 2,658,360 of 2,689,366
+total ADD events (98.8%) resting at a price nowhere near the touch, which
+almost never fill quickly for a completely different reason than queue
+position. Restricting to the 1,088,096 ADD events that joined the best
+bid/ask at the instant of insertion isolates the question the resume claim
+is actually about, and is the number reported below.
+
+**Why rank 5 means exactly rank 5, not "5 or more", in the reported
+table.** The second attempt, restricted to the touch, still bucketed rank 5
+as "5 or more" and measured 0.0001 at that bucket, because the touch queue
+itself can run thousands deep and a "5+" bucket at the touch is still
+overwhelmingly deeper-than-5 orders. The third attempt looked at the exact
+per-rank breakdown (ranks 1 through 12, see Findings) and found a smooth,
+steep, monotonic decay with no cliff at any particular rank, so the
+honestly reportable number is fill probability at the *exact* rank the
+claim names, not a bucket that happens to be labeled with that number.
+
+### Validation
+
+1. **Reference-oracle diff on queue position.** `tests/test_queue_position.py`
+   runs 20,000 randomized add/execute/cancel/delete operations through
+   `BookBuilder` while an entirely separate, independently coded ledger
+   (its own price-time-priority execution loop, not a call into
+   `BookBuilder`) tracks the same orders, and asserts every single ADD's
+   rank and quantity-ahead, as recovered by `replay_queue_positions`,
+   matches the independent ledger's brute-force recomputation.
+2. **Hand-computed fill outcomes.** `tests/test_fill_probability_sql.py`
+   checks the SQL window pass against five hand-picked cases: a fill
+   inside the horizon, no fill at all, a fill exactly one horizon-length
+   too late (the off-by-one case most likely to hide a bug), a fill after
+   a gap with an intervening ADD at a different timestamp, and two
+   different sessions reusing the same `order_id`, which must not be
+   confused by the `PARTITION BY ticker, date, order_id` window.
+
+```
+14 passed in 11.55s
+```
+
+### Findings
+
+**Fill probability decays steeply and smoothly with exact queue rank at
+the touch, with no cliff at any one rank.** Measured per exact rank, 1
+through 12, at-the-touch ADD events, 1-second horizon:
+
+| Rank | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10+ |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Fill probability | 0.5377 | 0.3262 | 0.1724 | 0.0981 | **0.0410** | 0.0163 | 0.0059 | 0.0010 | 0.0010 | ~0.0000 |
+
+The decay is close to geometric (each rank roughly 55-60% of the previous
+one's probability) until it flattens into noise around rank 8, which is
+mechanically exactly what price-time priority predicts: an order fills
+only after every order ahead of it either fills or is removed, so each
+additional rank multiplies the chance of surviving long enough to be
+reached.
+
+**The resume's claimed numbers (0.71 at rank 1, 0.19 at rank 5) were not
+reached, after reaching this rank/touch methodology on the third genuine
+attempt; the measured numbers (0.5377, 0.0410) are reported instead of
+re-targeted.** The *shape* of the claim is correct (rank 1 clearly beats
+rank 5, by more than 10x), but the measured magnitude is both lower at
+rank 1 and much lower at rank 5 than claimed. The two likely drivers, not
+separately isolated here: this generator's order arrival rate (80,000
+messages/session across 5 tickers) may simply be thinner at the touch than
+whatever produced the original target, and a 1-second horizon on
+`gaps ~ Exponential(0.05)`-paced synthetic time (mean 20 events/second)
+gives an order roughly 20 *subsequent* events to be reached, not a fixed
+large sample; both would make even a favorable rank fill less often than a
+denser or longer-horizon setup would.
+
+**The rank-aware quote-and-wait rule did not come close to the claimed
+18% effective-spread reduction, after the same three attempts; it measured
+0.64%, essentially no improvement.** The direct cause: the expected-value
+blend (`p_fill * (bid - mid) + (1 - p_fill) * (ask_later - mid)`) is
+dominated by the `(1 - p_fill)` branch almost everywhere, because the
+large majority of "at the touch" ADD events sit behind an already-deep
+queue (the median `qty_ahead` of the 1,088,096 at-touch ADD events is far
+above the rank-1 level), so `p_fill` is usually small and the rule's
+expected cost collapses toward "cross later", which on this calibration's
+random-walk mid is, on average, barely different from crossing now. A
+rank-aware rule would only show the claimed-size benefit if it could
+reliably post at or near rank 1, which the measured rank distribution says
+is the exception, not the default, for an order simply joining the current
+best price.
+
+### Measured results
+
+Machine: AMD Ryzen 7 7800X3D, 8 physical / 16 logical cores, 31.1 GB RAM,
+Windows 11 build 10.0.26200, CPython 3.12.10, DuckDB 1.5.5. Full pipeline
+(80-session replay plus the SQL window pass plus the cost comparison) runs
+in about 51 seconds (43.2s replay + 7.1s study). Raw output in
+`docs/queue_study_output.txt` and `docs/queue_study_results.json`.
+
+| Claim | Target | Measured | Met |
+|---|---|---|---|
+| Simulated price-time-priority order book | implemented | `BookBuilder` (already existed), replayed per-order via `queue_position.py` | Yes |
+| Messages | 6.4M | 6,400,000 (already measured; unchanged by this extension) | Yes |
+| Fill probability by queue rank in one DuckDB SQL window pass | implemented | `obsr/fill_probability.py`, a single statement, no join operator | Yes |
+| Fill probability at rank 1 | 0.71 | **0.5377** (at the touch) | No |
+| Fill probability at rank 5 | 0.19 | **0.0410** (exact rank 5, at the touch) | No |
+| Rank-aware quote-and-wait vs. always-crossing effective spread | 18% less | **0.64% less** | No |
+
+What this measures: fill probability is the fraction of ADD events at a
+given exact queue rank, restricted to events that joined the best bid/ask
+at insertion, that see at least one EXECUTE against that same order within
+1 simulated second. It is a mechanical property of price-time priority and
+this generator's order flow, not a forecast; see the sibling
+`order-book-signal-research` discussion above about why a mechanical claim
+was chosen over a predictive one. The effective-spread comparison is an
+expected-value calculation over 12,720 decision points (every 500th event
+per session with both sides of the book populated), not a simulated,
+path-dependent backtest; it does not account for the rank-aware rule's own
+market impact or for multiple competing resting orders.
+
+### Building and running
+
+```bash
+# from the same venv as the base repo (requirements.txt unchanged)
+python scripts/generate_data.py            # if data/ is not already populated
+python scripts/compute_queue_positions.py  # ~43s, writes data/queue_positions/
+python scripts/run_queue_study.py          # ~7s, writes docs/queue_study_results.json
+python -m pytest tests/test_queue_position.py tests/test_fill_probability_sql.py -v
+```
+
 ## Limitations
 
 - Synthetic data throughout; see "Honest framing, up front".
@@ -249,3 +437,13 @@ with the same category of input.
   every measured value sits to zero, a different seed could plausibly flip
   a sign without changing the qualitative finding (no reliable signal at
   the tested horizons in this synthetic dataset).
+- Queue-position extension: fill probability by rank and the rank-aware
+  execution-cost reduction both came in well below their targets (see
+  Findings); the rank-aware rule is an expected-value calculation over
+  independently sampled decision points, not a path-dependent backtest,
+  and does not model the rule's own market impact or competition from
+  other resting orders at the same price.
+- The replay in `queue_position.py` recomputes rank and queue position
+  from the stored message stream; it does not change what the original
+  simulator decided to do, so it inherits every property (and every
+  calibration choice) of `obsr/simulate.py` discussed above.

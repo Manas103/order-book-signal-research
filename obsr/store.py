@@ -14,6 +14,7 @@ import pyarrow.parquet as pq
 
 MESSAGES_DIR = "messages"
 FEATURES_DIR = "features"
+QUEUE_POSITIONS_DIR = "queue_positions"
 
 
 def write_partition(df: pd.DataFrame, base_dir: str, subdir: str) -> str:
@@ -36,6 +37,14 @@ def glob_pattern(base_dir: str, subdir: str) -> str:
     return str(Path(base_dir) / subdir / "**" / "*.parquet")
 
 
+def partition_path(base_dir: str, subdir: str, ticker: str, date: str) -> Path:
+    return Path(base_dir) / subdir / f"ticker={ticker}" / f"date={date}" / "part.parquet"
+
+
+def read_partition(base_dir: str, subdir: str, ticker: str, date: str) -> pd.DataFrame:
+    return pq.read_table(partition_path(base_dir, subdir, ticker, date)).to_pandas()
+
+
 def connect(read_only: bool = True) -> duckdb.DuckDBPyConnection:
     con = duckdb.connect(database=":memory:", read_only=False)
     con.execute("PRAGMA threads=4")
@@ -48,4 +57,9 @@ def messages_relation(con: duckdb.DuckDBPyConnection, base_dir: str) -> str:
     the Hive-style path (also present as real columns in the file, kept
     consistent by construction)."""
     pattern = glob_pattern(base_dir, MESSAGES_DIR)
+    return f"read_parquet('{pattern}', hive_partitioning=true)"
+
+
+def queue_positions_relation(con: duckdb.DuckDBPyConnection, base_dir: str) -> str:
+    pattern = glob_pattern(base_dir, QUEUE_POSITIONS_DIR)
     return f"read_parquet('{pattern}', hive_partitioning=true)"

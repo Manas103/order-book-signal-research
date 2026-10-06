@@ -1,5 +1,6 @@
 # Regenerate with: python scripts/generate_data.py (writes the 220 MB
-# partitioned Parquet message store to data/messages/)
+# partitioned Parquet message store to data/messages/), then
+# python scripts/compute_queue_positions.py (writes data/queue_positions/)
 data/
 
 __pycache__/

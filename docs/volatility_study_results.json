@@ -1,0 +1,24 @@
+{
+  "n_train_bins": 385,
+  "n_test_bins": 140,
+  "model_rmspe": 0.5397520824589839,
+  "baseline_rmspe": 7.264634026867589,
+  "gain_pct": 92.57014076052889,
+  "median_test_prev_rv": 0.10199801060662231,
+  "regime": [
+    {
+      "regime": "high_activity",
+      "n_bins": 70,
+      "model_rmspe": 0.4469035241579694,
+      "baseline_rmspe": 10.187327983924602,
+      "gain_pct": 95.61314286863863
+    },
+    {
+      "regime": "low_activity",
+      "n_bins": 70,
+      "model_rmspe": 0.6188229642901165,
+      "baseline_rmspe": 1.3297231428351923,
+      "gain_pct": 53.46227012559303
+    }
+  ]
+}

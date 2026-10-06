@@ -1,23 +1,2 @@
-============================= test session starts =============================
-platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0 -- C:\Users\Manas\Downloads\Auto Job Applier\Total Job Application process flow\projects\order-book-signal-research\.venv\Scripts\python.exe
-cachedir: .pytest_cache
-rootdir: C:\Users\Manas\Downloads\Auto Job Applier\Total Job Application process flow
-configfile: pytest.ini
-collecting ... collected 14 items
-
-tests\test_book_invariants.py::test_add_then_delete_conserves_total_resting_size PASSED [  7%]
-tests\test_book_invariants.py::test_crossing_add_is_rejected PASSED      [ 14%]
-tests\test_book_invariants.py::test_price_time_priority_on_execute PASSED [ 21%]
-tests\test_book_invariants.py::test_snapshot_never_negative_and_conserves_level_totals PASSED [ 28%]
-tests\test_book_invariants.py::test_execute_stops_when_book_side_exhausted PASSED [ 35%]
-tests\test_features.py::test_spread_microprice_and_qi_hand_computed PASSED [ 42%]
-tests\test_features.py::test_all_declared_feature_columns_are_present_in_output PASSED [ 50%]
-tests\test_fill_probability_sql.py::test_fill_probability_hand_computed PASSED [ 57%]
-tests\test_labels_and_leakage.py::test_sql_labels_match_independent_pandas_reimplementation PASSED [ 64%]
-tests\test_labels_and_leakage.py::test_label_is_null_for_last_h_rows_of_each_session_not_leaked_from_next PASSED [ 71%]
-tests\test_labels_and_leakage.py::test_purged_day_split_has_no_date_overlap_and_respects_embargo PASSED [ 78%]
-tests\test_queue_position.py::test_hand_computed_rank_and_qty_ahead PASSED [ 85%]
-tests\test_queue_position.py::test_randomized_rank_against_independent_brute_force PASSED [ 92%]
-tests\test_reference_oracle.py::test_fast_book_matches_slow_oracle_exactly PASSED [100%]
-
-============================= 14 passed in 11.55s =============================
+....................                                                     [100%]
+20 passed in 12.21s

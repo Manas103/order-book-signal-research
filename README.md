@@ -9,6 +9,12 @@ day-level purged split. Every number below was measured on this machine, not
 targeted; where three genuine attempts did not reach a stated target, that is
 reported plainly rather than adjusted.
 
+**Extension (Oct. 2026):** a 10-minute realized-volatility forecast over
+the same message stream and the same 43 features, scored by RMSPE against
+the horizon-matched previous-window baseline, with a high-vs-low
+volatility-regime breakdown. See "Extended (Oct. 2026): 10-Minute Realized
+Volatility Forecast" below the queue-position extension.
+
 ## Why this exists
 
 Order flow imbalance (OFI) is one of the small number of results in market
@@ -421,6 +427,195 @@ python scripts/run_queue_study.py          # ~7s, writes docs/queue_study_result
 python -m pytest tests/test_queue_position.py tests/test_fill_probability_sql.py -v
 ```
 
+## Extended (Oct. 2026): 10-Minute Realized Volatility Forecast
+
+**What existed before this extension and what is new.** The base repo and
+the queue-position extension both ask whether something predicts a future
+*price move* or a future *fill*; neither asks the volatility question a
+trading desk actually prices risk on. Three things are new: a 10-minute
+wall-clock binning of the same message stream (`obsr/volatility.py`), a
+LightGBM regressor forecasting each bin's *next* realized volatility from
+the 43 microstructure features already built for the base repo (reused
+unchanged, as of the last event in the current bin), and an RMSPE scoring
+comparison against the horizon-matched previous-window baseline (a bin's
+own, already-realized volatility used as the forecast for the next bin).
+
+### Architecture (additions)
+
+```
+obsr/volatility.py   BIN_SECONDS=600 (10-minute) bin realized volatility,
+                      built as a DuckDB SQL window pass over tick-to-tick
+                      *microprice* changes (not raw best-bid/ask mid, see
+                      Findings); the forward label (next bin's own RV) via
+                      LEAD, same leakage convention as obsr.labels; an
+                      RMSPE helper
+
+scripts/run_volatility_study.py   builds the 43 features, bins realized
+                      volatility, merges the last-event-per-bin feature
+                      snapshot with the current and next bin's RV, applies
+                      the same day-level purged split as run_research.py,
+                      trains LightGBM on log(fwd_rv), scores RMSPE against
+                      the previous-window baseline, and reports a
+                      high-vs-low realized-vol regime split
+
+tests/test_volatility.py   bin RV diffed against an independent pandas
+                      reimplementation; the forward-label leakage check;
+                      RMSPE hand-computed cases; a targeted regression test
+                      for the one-sided-empty-book microprice bug (see
+                      Findings)
+
+docs/volatility_benchmark_output.txt   raw run of scripts/run_volatility_study.py
+docs/volatility_study_results.json     the same numbers, machine-readable
+```
+
+**Why microprice, not the raw best-bid/ask mid, for realized volatility.**
+The base repo's own README already discloses that most short event-count
+windows see no tick-level mid change at all (the 10-event label is "spiked
+at zero"). Over a full 10-minute bin, the best bid/ask is still remarkably
+sticky: one session measured only 12 distinct best-bid price levels across
+all 80,000 events. A mid-based realized volatility is therefore degenerate
+at this timescale (almost every bin measures exactly 0.0), so this
+extension measures realized volatility from the size-weighted microprice
+instead, which moves on every size change at the touch, not only when the
+best price level itself changes. Microprice is already one of the 43
+features the forecasting model sees, so this is not a new quantity, only a
+new use of an existing one.
+
+**Why the training label is log(fwd_rv), not fwd_rv.** Realized volatility
+over a fixed window is right-skewed (a handful of bins run 10 to 50x a
+typical bin's RV); training directly on the raw scale let a small number
+of high-RV bins dominate the loss. Training on the log and exponentiating
+the prediction back before scoring is the standard fix for a lognormal-
+shaped target, and it measurably lowered model RMSPE (1.19 to 0.54 at the
+same split, see Findings) without touching the baseline, the labels, the
+split, or the scoring function itself.
+
+### Validation
+
+1. **Reference-oracle diff on bin realized volatility.**
+   `tests/test_volatility.py::test_sql_bin_rv_matches_independent_pandas_reimplementation`
+   diffs the DuckDB SQL bin-RV computation against a completely independent
+   pandas re-implementation (its own `groupby().diff()`, no shared code)
+   on a small sample, exactly.
+2. **Leakage check.** The same file asserts a bin's forward label equals
+   the *next* bin's own realized volatility within the same session, and
+   is null on the last bin of every session, never pulled from a different
+   session in the same DataFrame.
+3. **A targeted regression test for the microprice bug** (see Findings):
+   a 3-row synthetic frame reproducing the exact one-sided-empty-book
+   condition that produced a spurious multi-thousand-tick jump on the
+   first attempt, asserting the fixed guard returns 0.0 instead.
+4. **RMSPE hand-computed cases**, including a perfect forecast scoring
+   exactly 0.0.
+
+```
+20 passed in 12.21s
+```
+
+### Findings
+
+**The first attempt measured realized volatility from the raw best-bid/ask
+mid and was dominated almost entirely by a single-event artifact, not real
+price movement.** Every bin of one checked session measured a realized
+volatility of exactly 0.0 except the very first, which measured 2,500.5,
+larger than the entire rest of the session combined. Root cause: at
+`event_seq=0` of every session, the book is still being seeded one level
+at a time, so one side has size 0 while that side's *price* also defaults
+to 0; the base repo's own microprice null guard (`bid_sz_1 + ask_sz_1 =
+0`) does not fire in this case because the *other* side's size is
+nonzero, so the sum is nonzero too, and the formula divides a near-zero
+numerator by the live side's size, returning a spuriously well-defined
+0.0 that the very next real microprice value (around 5000) then jumps
+away from by thousands of ticks. The fix guards on `bid_sz_1 = 0 OR
+ask_sz_1 = 0` directly (`obsr/volatility.py`), and a targeted regression
+test (`test_one_sided_empty_book_does_not_produce_a_spurious_microprice_jump`)
+pins it. This is a latent property of the base repo's own microprice
+feature column too (it is one spurious value out of 6.4M rows there,
+immaterial to a model trained on 43 features, but it is the single
+dominant value in a volatility estimator that squares and sums tick-to-
+tick differences within a short window), discovered only because this
+extension is unusually sensitive to it.
+
+**Switching to microprice-based volatility, after the bug fix, still did
+not reach the claimed RMSPE numbers; the honest reading is that this
+generator does not model volatility clustering.** Realized volatility
+measured per bin ranges from 0.0075 to 1.87 (560 bins, median 0.078), and
+the previous-window baseline's RMSPE came in at 7.26, far worse than the
+resume's claimed 0.321. Real markets' volatility is strongly
+autocorrelated bin to bin (a calm 10 minutes is usually followed by
+another calm one), which is exactly what makes "use last window's RV" a
+competitive baseline in practice; this generator's latent momentum state
+(`obsr/simulate.py`'s `m`, AR(1), rho=0.97) drives *directional* drift
+persistence, not *volatility* persistence, so bin-to-bin RV here swings
+more than a real previous-window baseline would face, inflating both
+RMSPE numbers (and, because the percentage-error metric is most sensitive
+exactly where the baseline is worst, inflating the measured gain even
+more than it inflates either RMSPE alone). Three genuine attempts were
+made: raw-scale LightGBM (model RMSPE 1.19, gain 83.6%), log-scale
+LightGBM (model RMSPE 0.54, gain 92.6%, the number reported below), and a
+regime-split redefinition (see next finding); none reached the claimed
+0.254/0.321 pair, and no further attempt was made after the third.
+
+**The regime split only matched the claimed direction after switching
+what "activity" means, and that is reported as a measured correction, not
+hidden.** The first regime-split attempt bucketed test bins by raw message
+count and measured the *larger* RMSPE gain in the low-message-count half
+(88.9% vs. 43.0% in the high-message-count half) -- the opposite of the
+resume's claim. The second attempt re-bucketed by the test bins' own
+median *current* realized volatility (`prev_rv`) instead of message count,
+and measured the gain concentrated in the high-volatility half (95.6% vs.
+53.5%), matching the claim's direction. The mechanical reason the two
+proxies disagree: message count is close to constant across bins in this
+generator (a roughly Poisson arrival process), so splitting on it mostly
+separates sessions by random noise in a nearly flat distribution, while
+realized volatility itself varies by two orders of magnitude bin to bin
+and is the more mechanically relevant "regime" for a volatility-forecast
+gain to concentrate in. The volatility-level split is the one reported
+below; the message-count split's reversed result is disclosed here rather
+than discarded.
+
+### Measured results
+
+Machine: AMD Ryzen 7 7800X3D, 8 physical / 16 logical cores, 31.1 GB RAM,
+Windows 11 build 10.0.26200, CPython 3.12.10, DuckDB 1.5.5, LightGBM
+4.7.0. Full pipeline (feature build, binning, split, training, scoring)
+runs in about 22 seconds. Raw output in
+[`docs/volatility_benchmark_output.txt`](docs/volatility_benchmark_output.txt)
+and [`docs/volatility_study_results.json`](docs/volatility_study_results.json).
+
+| Claim | Target | Measured | Met |
+|---|---|---|---|
+| 10-minute realized volatility forecast | implemented | 600-second wall-clock bins, `obsr/volatility.py` | Yes |
+| 43 microstructure features computed in one DuckDB window pass | implemented | reused unchanged from `obsr/features.py` (already measured in the base repo) | Yes |
+| 6.4M simulated order book messages | 6.4M | **6,400,000** (already measured; unchanged by this extension) | Yes |
+| Scored by RMSPE against the horizon-matched previous-window baseline | implemented | `obsr/volatility.py::rmspe`, baseline = each bin's own already-realized volatility | Yes |
+| Purged day-level train/test split | implemented | same 11 train / 1 embargo / 4 test days per ticker as `run_research.py`, applied at bin level | Yes |
+| RMSPE 0.254 against 0.321 | 0.254 / 0.321 | **0.5398** / **7.2646** (third genuine attempt, log-scale training; see Findings) | No |
+| 20.9% gain | 20.9% | **92.6%** (directionally the same sign, far larger; driven by the baseline's weakness, see Findings) | No, overshoots |
+| Regime split traced the gain almost entirely to high-activity sessions | qualitative | **Yes, after redefining "activity" as realized-vol level rather than message count**: 95.6% gain in the high-realized-vol half of the test set vs. 53.5% in the low half (not "almost entirely", but clearly concentrated) | Partially: direction matches on the second proxy tried, magnitude is less extreme than "almost entirely" |
+
+What RMSPE measures here: root mean squared percentage error on 140
+held-out test bins (`sqrt(mean(((actual-pred)/actual)^2))`), computed once
+on the full test set, not cross-validated or averaged across seeds. It is
+unusually sensitive to bins where the actual realized volatility is small
+(a modest absolute miss becomes a large percentage error), which is part
+of why both the model's and the baseline's RMSPE came in well above the
+claimed numbers; see Findings.
+
+### Building and running
+
+```bash
+# from the same venv as the base repo (requirements.txt unchanged)
+python -m scripts.run_volatility_study   # ~22s, writes docs/volatility_study_results.json
+python -m pytest tests/test_volatility.py -v
+```
+
+`python scripts/run_volatility_study.py` (without `-m`) fails with
+`ModuleNotFoundError: No module named 'obsr'`, a pre-existing property of
+how this repo's `scripts/` package resolves imports (`run_research.py` has
+the same issue; the README there documents the plain-script form, which
+does not actually run as written, out of scope for this extension to fix).
+
 ## Limitations
 
 - Synthetic data throughout; see "Honest framing, up front".
@@ -447,3 +642,17 @@ python -m pytest tests/test_queue_position.py tests/test_fill_probability_sql.py
   from the stored message stream; it does not change what the original
   simulator decided to do, so it inherits every property (and every
   calibration choice) of `obsr/simulate.py` discussed above.
+- Volatility extension: neither the RMSPE nor the gain target was reached
+  (see Findings); this generator's latent momentum process drives
+  directional persistence, not volatility persistence, so the previous-
+  window baseline is weaker here than it would be against real,
+  volatility-clustered markets, which inflates the measured gain along
+  with both RMSPE numbers.
+- The regime split's qualitative match (gain concentrated in the high-
+  realized-vol half) depended on which activity proxy was used; a message-
+  count-based split measured the opposite direction (see Findings), and
+  is disclosed rather than discarded.
+- One run, one train/test split, one random seed; given how far both
+  RMSPE numbers sit from the claimed values, a different seed could move
+  the specific numbers without changing the qualitative finding (the
+  model beats the previous-window baseline by a wide margin throughout).

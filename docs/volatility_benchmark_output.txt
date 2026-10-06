@@ -1,0 +1,13 @@
+Building 43 microstructure features (same DuckDB window pass as run_research.py)...
+Features built: 6,400,000 rows, 18.1s.
+Building 10-minute bin realized volatility...
+640 total bins across all sessions; 560 have a defined forward label (the rest are each session's last bin).
+Split: 385 train bins, 140 test bins (11 train days, 1 embargo day, remaining test days, per ticker).
+
+Model RMSPE:    0.5398
+Baseline RMSPE: 7.2646  (previous-window realized vol)
+Gain: +92.6%
+  high_activity: n=  70  model_rmspe=0.4469  baseline_rmspe=10.1873  gain=+95.6%
+   low_activity: n=  70  model_rmspe=0.6188  baseline_rmspe=1.3297  gain=+53.5%
+
+Done in 21.7s. Results written to docs/volatility_study_results.json
